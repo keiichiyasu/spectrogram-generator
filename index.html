@@ -97,7 +97,10 @@
     border: 1px solid #ccc;
     border-radius: 8px;
     margin-top: 10px;
+    touch-action: none;
+    cursor: crosshair;
   }
+  #trimBtn { background: #b06fd8; color: #fff; }
   .hint { font-size: 13px; color: #888; margin-top: 16px; line-height: 1.7; }
 
   /* ---------- 印刷（ハガキシール） ---------- */
@@ -140,6 +143,8 @@
   <div class="toolbar">
     <button id="recBtn">● ろくおん</button>
     <button id="playBtn" disabled>▶ きく</button>
+    <button id="trimBtn" disabled>✂ トリミング</button>
+    <button id="resetBtn" disabled>↩ もどす</button>
     <button id="printBtn" disabled>🖨 いんさつ</button>
     <span id="timer"></span>
   </div>
@@ -168,6 +173,7 @@
 
   <div class="hint">
     つかいかた：「ろくおん」→ はなす（さいだい5秒）→「とめる」→「いんさつ」。<br>
+    スペクトログラムの上をマウスでドラッグすると範囲を選べます。「✂ トリミング」でその部分だけを残せます（「↩ もどす」で録音全体に戻ります）。<br>
     印刷ダイアログで用紙サイズ「はがき」・ふちなし（または余白最小）を選んでください。設定はプリンタ側に記憶されるので2回目からはワンクリックです。<br>
     このファイルをダブルクリックで開くだけで動きます（初回のみマイク許可が必要）。
   </div>
@@ -186,14 +192,19 @@ const MAX_FREQ = 8000;
 
 const $ = id => document.getElementById(id);
 const recBtn = $("recBtn"), playBtn = $("playBtn"), printBtn = $("printBtn");
+const trimBtn = $("trimBtn"), resetBtn = $("resetBtn");
 const statusEl = $("status"), timerEl = $("timer");
 const liveCanvas = $("liveCanvas"), specCanvas = $("specCanvas");
 
 let audioCtx = null, mediaStream = null, procNode = null, srcNode = null;
 let recording = false;
 let chunks = [], recSampleRate = 48000;
-let samples = null;          // 録音済み Float32Array
+let samples = null;          // 表示中の Float32Array
+let origSamples = null;      // トリミング前の録音全体
 let playSource = null;
+let geom = null;             // 描画レイアウト（時間←→x座標の変換用）
+let baseCanvas = null;       // 選択ハイライトなしの描画結果
+let selA = null, selB = null, selecting = false;   // 選択範囲（秒）
 
 /* ---------------- 録音 ---------------- */
 async function startRecording() {
@@ -211,12 +222,13 @@ async function startRecording() {
   srcNode = audioCtx.createMediaStreamSource(mediaStream);
   procNode = audioCtx.createScriptProcessor(4096, 1, 1);
   chunks = [];
+  initLive();
   procNode.onaudioprocess = ev => {
     if (!recording) return;
     chunks.push(new Float32Array(ev.inputBuffer.getChannelData(0)));
     const sec = chunks.length * 4096 / recSampleRate;
     timerEl.textContent = sec.toFixed(1) + " 秒";
-    drawLive(chunks[chunks.length - 1]);
+    drawLive(chunks[chunks.length - 1], sec);
     if (sec >= MAX_SEC) stopRecording();
   };
   srcNode.connect(procNode);
@@ -247,6 +259,8 @@ function stopRecording() {
     samples = null;
     return;
   }
+  origSamples = samples;
+  resetBtn.disabled = true;
   playBtn.disabled = printBtn.disabled = false;
   renderSpectrogram();
 }
@@ -280,19 +294,32 @@ playBtn.addEventListener("click", () => {
   playSource.start();
 });
 
-/* ---------------- ライブ波形 ---------------- */
-function drawLive(block) {
+/* ---------------- ライブ波形（左から右へ 5秒ぶん） ---------------- */
+function initLive() {
   const c = liveCanvas, ctx = c.getContext("2d");
-  if (c.width !== c.clientWidth * 2) { c.width = c.clientWidth * 2; c.height = c.clientHeight * 2; }
-  const W = c.width, H = c.height;
-  ctx.drawImage(c, -8, 0);            // 左へスクロール
+  c.width = c.clientWidth * 2; c.height = c.clientHeight * 2;
   ctx.fillStyle = "#fff";
-  ctx.fillRect(W - 8, 0, 8, H);
-  let mn = 1, mx = -1;
-  for (let i = 0; i < block.length; i++) { mn = Math.min(mn, block[i]); mx = Math.max(mx, block[i]); }
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.fillStyle = "#eee";
+  ctx.fillRect(0, c.height / 2 - 1, c.width, 2);
+}
+function drawLive(block, secEnd) {
+  const c = liveCanvas, ctx = c.getContext("2d");
+  const W = c.width, H = c.height;
+  const blockSec = block.length / recSampleRate;
+  const SUB = 8;                      // ブロックを細分して描く
   ctx.fillStyle = "#e8560f";
-  const y1 = H / 2 - mx * H / 2, y2 = H / 2 - mn * H / 2;
-  ctx.fillRect(W - 8, y1, 8, Math.max(2, y2 - y1));
+  for (let s = 0; s < SUB; s++) {
+    const i0 = Math.floor(block.length * s / SUB);
+    const i1 = Math.floor(block.length * (s + 1) / SUB);
+    let mn = 1, mx = -1;
+    for (let i = i0; i < i1; i++) { const v = block[i]; if (v < mn) mn = v; if (v > mx) mx = v; }
+    const t0 = secEnd - blockSec + blockSec * s / SUB;
+    const x = Math.floor(t0 / MAX_SEC * W);
+    const w = Math.max(1, Math.ceil(blockSec / SUB / MAX_SEC * W));
+    const y1 = H / 2 - mx * H / 2, y2 = H / 2 - mn * H / 2;
+    ctx.fillRect(x, y1, w, Math.max(2, y2 - y1));
+  }
 }
 
 /* ---------------- FFT ---------------- */
@@ -451,13 +478,82 @@ function renderSpectrogram() {
   }
   ctx.fillText("びょう（秒）", mL + plotW / 2, specTop + specH + 54);
 
+  // 選択操作用にレイアウトと素の描画結果を保存
+  geom = { mL, plotW, mT, specTop, specH, dur };
+  baseCanvas = document.createElement("canvas");
+  baseCanvas.width = W; baseCanvas.height = H;
+  baseCanvas.getContext("2d").drawImage(specCanvas, 0, 0);
+  selA = selB = null;
+  trimBtn.disabled = true;
+
   updatePrintSheet();
 }
+
+/* ---------------- ドラッグ選択とトリミング ---------------- */
+function evtTime(e) {
+  const r = specCanvas.getBoundingClientRect();
+  const x = (e.clientX - r.left) * specCanvas.width / r.width;
+  const t = (x - geom.mL) / geom.plotW * geom.dur;
+  return Math.max(0, Math.min(geom.dur, t));
+}
+function drawOverlay() {
+  if (!baseCanvas) return;
+  const ctx = specCanvas.getContext("2d");
+  ctx.drawImage(baseCanvas, 0, 0);
+  if (selA === null || selB === null || selA === selB) return;
+  const t0 = Math.min(selA, selB), t1 = Math.max(selA, selB);
+  const x0 = geom.mL + t0 / geom.dur * geom.plotW;
+  const x1 = geom.mL + t1 / geom.dur * geom.plotW;
+  const top = geom.mT, bot = geom.specTop + geom.specH;
+  ctx.fillStyle = "rgba(22,104,200,0.20)";
+  ctx.fillRect(x0, top, x1 - x0, bot - top);
+  ctx.strokeStyle = "#1668c8";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(x0, top); ctx.lineTo(x0, bot);
+  ctx.moveTo(x1, top); ctx.lineTo(x1, bot);
+  ctx.stroke();
+  ctx.lineWidth = 1;
+}
+specCanvas.addEventListener("pointerdown", e => {
+  if (!samples || !geom) return;
+  e.preventDefault();
+  try { specCanvas.setPointerCapture(e.pointerId); } catch (err) {}
+  selecting = true;
+  selA = selB = evtTime(e);
+  drawOverlay();
+});
+specCanvas.addEventListener("pointermove", e => {
+  if (!selecting) return;
+  selB = evtTime(e);
+  drawOverlay();
+});
+specCanvas.addEventListener("pointerup", e => {
+  if (!selecting) return;
+  selecting = false;
+  selB = evtTime(e);
+  if (Math.abs(selB - selA) < 0.05) selA = selB = null;   // クリックだけなら選択解除
+  drawOverlay();
+  trimBtn.disabled = (selA === null);
+});
+trimBtn.addEventListener("click", () => {
+  if (selA === null || selB === null || !samples) return;
+  const t0 = Math.min(selA, selB), t1 = Math.max(selA, selB);
+  samples = samples.slice(Math.round(t0 * recSampleRate), Math.round(t1 * recSampleRate));
+  resetBtn.disabled = false;
+  renderSpectrogram();
+});
+resetBtn.addEventListener("click", () => {
+  if (!origSamples) return;
+  samples = origSamples;
+  resetBtn.disabled = true;
+  renderSpectrogram();
+});
 
 /* ---------------- 印刷 ---------------- */
 function updatePrintSheet() {
   if (!samples) return;
-  $("printImg").src = specCanvas.toDataURL("image/png");
+  $("printImg").src = (baseCanvas || specCanvas).toDataURL("image/png");
   const word = $("wordInput").value.trim();
   const name = $("nameInput").value.trim();
   const d = new Date();
@@ -510,6 +606,8 @@ window.loadTestSignal = function () {
   }
   recSampleRate = fs;
   samples = x;
+  origSamples = x;
+  resetBtn.disabled = true;
   playBtn.disabled = printBtn.disabled = false;
   renderSpectrogram();
 };
