@@ -134,7 +134,7 @@
     #printCaption .meta { font-size: 10pt; color: #333; margin-left: 4mm; }
   }
 </style>
-<style id="pageStyle">@page { size: 148mm 100mm; margin: 0; }</style>
+<style id="pageStyle">@page { size: 127mm 89mm; margin: 0; }</style>
 </head>
 <body>
 <div class="app">
@@ -165,8 +165,8 @@
     <label><input type="checkbox" id="trimSilence" checked> 前後の無音をカット</label>
     <label>用紙の向き
       <select id="orient">
-        <option value="landscape" selected>ハガキ よこ（148×100）</option>
-        <option value="portrait">ハガキ たて（100×148）</option>
+        <option value="landscape" selected>写真L判 よこ（127×89）</option>
+        <option value="portrait">写真L判 たて（89×127）</option>
       </select>
     </label>
   </div>
@@ -174,7 +174,7 @@
   <div class="hint">
     つかいかた：「ろくおん」→ はなす（さいだい5秒）→「とめる」→「いんさつ」。<br>
     スペクトログラムの上をマウスでドラッグすると範囲を選べます。「✂ トリミング」でその部分だけを残せます（「↩ もどす」で録音全体に戻ります）。<br>
-    印刷ダイアログで用紙サイズ「はがき」・ふちなし（または余白最小）を選んでください。設定はプリンタ側に記憶されるので2回目からはワンクリックです。<br>
+    印刷ダイアログで用紙サイズ「L判（127×89mm）」・ふちなし（または余白最小）を選んでください。設定はプリンタ側に記憶されるので2回目からはワンクリックです。<br>
     このファイルをダブルクリックで開くだけで動きます（初回のみマイク許可が必要）。
   </div>
 </div>
@@ -569,8 +569,8 @@ printBtn.addEventListener("click", () => {
 
 $("orient").addEventListener("change", () => {
   $("pageStyle").textContent = $("orient").value === "landscape"
-    ? "@page { size: 148mm 100mm; margin: 0; }"
-    : "@page { size: 100mm 148mm; margin: 0; }";
+    ? "@page { size: 127mm 89mm; margin: 0; }"
+    : "@page { size: 89mm 127mm; margin: 0; }";
 });
 
 ["dynRange", "trimSilence"].forEach(id => $(id).addEventListener("input", () => {
